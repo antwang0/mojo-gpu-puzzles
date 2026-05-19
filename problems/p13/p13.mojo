@@ -34,8 +34,27 @@ def conv_1d_simple(
 ):
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
-    # FILL ME IN (roughly 14 lines)
 
+    var shared = stack_allocation[
+        dtype=dtype, address_space=AddressSpace.SHARED
+    ](row_major[TPB]())
+    var shared_kernel = stack_allocation[
+        dtype=dtype, address_space=AddressSpace.SHARED
+    ](row_major[CONV]())
+
+    if global_i < SIZE:
+        shared[local_i] = a[global_i]
+    if local_i < CONV:
+        shared_kernel[local_i] = b[local_i]
+    barrier()
+
+    if global_i < SIZE:
+        var sum: output.ElementType = 0.0
+        comptime for j in range(CONV):
+            var new_idx = local_i + j
+            if new_idx < TPB:
+                sum += shared[new_idx] * shared_kernel[j]
+        output[global_i] = sum
 
 # ANCHOR_END: conv_1d_simple
 
@@ -59,7 +78,36 @@ def conv_1d_block_boundary(
 ):
     var global_i = block_dim.x * block_idx.x + thread_idx.x
     var local_i = thread_idx.x
-    # FILL ME IN (roughly 18 lines)
+
+    var shared = stack_allocation[
+        dtype=dtype, address_space=AddressSpace.SHARED
+    ](row_major[TPB + CONV_2 - 1]())
+    var shared_kernel = stack_allocation[
+        dtype=dtype, address_space=AddressSpace.SHARED
+    ](row_major[CONV_2]())
+
+    if global_i < SIZE_2:
+        shared[local_i] = a[global_i]
+
+        var next_block_i = global_i + TPB
+        if next_block_i < TPB + CONV_2 - 1:
+            if next_block_i < SIZE_2:
+                shared[next_block_i] = a[next_block_i]
+            else:
+                shared[next_block_i] = 0.0
+    else:
+        shared[local_i] = 0.0
+
+    if local_i < CONV_2:
+        shared_kernel[local_i] = b[local_i]
+    barrier()
+
+    if global_i < SIZE_2:
+        var sum: output.ElementType = 0.0
+        comptime for j in range(CONV_2):
+            var new_idx = local_i + j
+            sum += shared[new_idx] * shared_kernel[j]
+        output[global_i] = sum
 
 
 # ANCHOR_END: conv_1d_block_boundary
